@@ -6,20 +6,24 @@ const socket = socketIOClient("http://localhost:5000");
 
 export default function Chat() {
   const [users, setUsers] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [messages, setMessages] = useState([]);
   const [currentMessage, setCurrentMessage] = useState("");
-  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedChat, setSelectedChat] = useState(null);
+  const [isGroup, setIsGroup] = useState(false);
 
   useEffect(() => {
-    const fetchUsers = async () => {
-      const res = await axios.get("http://localhost:5000/users");
-      setUsers(res.data);
+    const fetchUsersAndGroups = async () => {
+      const usersRes = await axios.get("http://localhost:5000/users");
+      const groupsRes = await axios.get("http://localhost:5000/groups");
+      setUsers(usersRes.data);
+      setGroups(groupsRes.data);
     };
 
-    fetchUsers();
-    socket.on("update-users", (users) => {
-      setUsers(users);
-    });
+    fetchUsersAndGroups();
+
+    socket.on("update-users", (updatedUsers) => setUsers(updatedUsers));
+    socket.on("update-groups", (updatedGroups) => setGroups(updatedGroups));
   }, []);
 
   useEffect(() => {
@@ -31,56 +35,88 @@ export default function Chat() {
     }
   }, []);
 
-  const handleSendMessage = () => {
-    if (selectedUser && currentMessage.trim()) {
-      const messageData = {
-        senderID: localStorage.getItem("userID"),
-        receiverID: selectedUser.userID,
-        senderUsername: localStorage.getItem("username"),
-        message: currentMessage,
-      };
-
-      socket.emit("send-message", messageData);
-      setMessages([
-        ...messages,
-        { ...messageData, senderUsername: "You", _id: Date.now() },
-      ]);
-      setCurrentMessage("");
-    }
-  };
-
   useEffect(() => {
     socket.on("receive-message", (message) => {
-      setMessages((prevMessages) => [...prevMessages, message]);
+      if (
+        (message.receiverID === selectedChat?._id && !isGroup) ||
+        (isGroup && message.groupID === selectedChat?._id)
+      ) {
+        setMessages((prevMessages) => [...prevMessages, message]);
+      }
     });
 
     return () => socket.off("receive-message");
-  }, []);
+  }, [selectedChat, isGroup]);
+
+  const handleSendMessage = () => {
+    if (!currentMessage.trim() || !selectedChat) return;
+
+    const messageData = {
+      senderID: localStorage.getItem("userID"),
+      senderUsername: localStorage.getItem("username"),
+      message: currentMessage,
+      ...(isGroup
+        ? { groupID: selectedChat._id }
+        : { receiverID: selectedChat._id }),
+    };
+
+    socket.emit(isGroup ? "send-group-message" : "send-message", messageData);
+    setMessages([
+      ...messages,
+      { ...messageData, senderUsername: "You", _id: Date.now() },
+    ]);
+    setCurrentMessage("");
+  };
 
   return (
     <div className="app">
-      {/* Sidebar */}
       <div className="sidebar">
         <h3>Users</h3>
         <ul className="user-list">
           {users.map((user) => (
             <li
               key={user._id}
-              onClick={() => setSelectedUser(user)}
-              className={selectedUser?._id === user._id ? "active" : ""}
+              onClick={() => {
+                setSelectedChat(user);
+                setIsGroup(false);
+                setMessages([]);
+              }}
+              className={
+                selectedChat?._id === user._id && !isGroup ? "active" : ""
+              }
             >
               {user.username}
             </li>
           ))}
         </ul>
+
+        <h3>Groups</h3>
+        <ul className="user-list">
+          {groups.map((group) => (
+            <li
+              key={group._id}
+              onClick={() => {
+                setSelectedChat(group);
+                setIsGroup(true);
+                setMessages([]);
+              }}
+              className={
+                selectedChat?._id === group._id && isGroup ? "active" : ""
+              }
+            >
+              {group.name}
+            </li>
+          ))}
+        </ul>
       </div>
 
-      {/* Chat Window */}
       <div className="chat">
         <div className="chat-header">
-          {selectedUser
-            ? `Chat with ${selectedUser.username}`
-            : "Select a user"}
+          {selectedChat
+            ? isGroup
+              ? `Group: ${selectedChat.name}`
+              : `Chat with ${selectedChat.username}`
+            : "Select a chat"}
         </div>
 
         <div className="messages">
@@ -96,8 +132,7 @@ export default function Chat() {
           ))}
         </div>
 
-        {/* Input Container */}
-        {selectedUser && (
+        {selectedChat && (
           <div className="input-container">
             <input
               type="text"

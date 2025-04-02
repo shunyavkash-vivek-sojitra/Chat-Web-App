@@ -5,6 +5,7 @@ const { Server } = require("socket.io");
 const mongoose = require("mongoose");
 const User = require("./models/User");
 const Message = require("./models/Message");
+const Group = require("./models/Group"); // Import Group model
 const dbConnect = require("./configs/db");
 
 const app = express();
@@ -13,13 +14,12 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 dbConnect();
 
-const users = {}; // Store active users (Key: userID, Value: socket info)
-let groups = {}; // Store active groups (Key: groupID, Value: group info)
+const users = {}; // Active users { userID: { id, name, socketID } }
 
 app.use(cors());
 app.use(express.json());
 
-// Register route
+// Register User
 app.post("/register", async (req, res) => {
   const { userID, username } = req.body;
 
@@ -38,12 +38,14 @@ app.post("/register", async (req, res) => {
 
     return res.status(201).json({ userID, username });
   } catch (error) {
-    console.error("Error creating user:", error);
-    return res.status(500).json({ error: "Registration failed" });
+    console.error("❌ Registration Error:", error); // Print the real error
+    return res
+      .status(500)
+      .json({ error: "Registration failed", details: error.message });
   }
 });
 
-// Create group route
+// Create Group
 app.post("/create-group", async (req, res) => {
   const { groupName, members } = req.body;
 
@@ -54,18 +56,12 @@ app.post("/create-group", async (req, res) => {
   }
 
   try {
-    const groupID = `group-${Date.now()}`;
-    groups[groupID] = { groupID, groupName, members };
+    const newGroup = new Group({ groupName, members });
+    await newGroup.save();
 
-    // Store group creation in the DB (for future messaging)
-    await Message.create({
-      groupID,
-      messages: [],
-    });
-
-    return res.status(201).json({ groupID, groupName, members });
+    return res.status(201).json(newGroup);
   } catch (error) {
-    console.error(error);
+    console.error("❌ Error creating group:", error);
     return res.status(500).json({ error: "Group creation failed" });
   }
 });
@@ -76,31 +72,38 @@ app.get("/users", async (req, res) => {
     const usersList = await User.find();
     res.status(200).json(usersList);
   } catch (error) {
-    console.error("Error fetching users:", error);
     res.status(500).json({ error: "Error fetching users" });
+  }
+});
+
+// Get all groups
+app.get("/groups", async (req, res) => {
+  try {
+    const allGroups = await Group.find();
+    res.status(200).json(allGroups);
+  } catch (error) {
+    res.status(500).json({ error: "Error fetching groups" });
   }
 });
 
 io.on("connection", (socket) => {
   console.log("A user connected");
 
-  // When a user joins, add them to the users list
   socket.on("join", (userID, username) => {
     users[userID] = { id: userID, name: username, socketID: socket.id };
-    io.emit("update-users", Object.values(users)); // Emit updated user list
+    io.emit("update-users", Object.values(users));
   });
 
-  // When a user joins a group
   socket.on("join-group", (groupID) => {
-    if (groups[groupID]) {
-      socket.join(groupID);
-    }
+    socket.join(groupID);
   });
 
   // Send 1-on-1 message
   socket.on(
     "send-message",
-    ({ senderID, receiverID, senderUsername, message }) => {
+    async ({ senderID, receiverID, senderUsername, message }) => {
+      console.log(`🔹 Message from ${senderID} to ${receiverID}`);
+
       if (users[receiverID]) {
         io.to(users[receiverID].socketID).emit("receive-message", {
           senderID,
@@ -108,63 +111,38 @@ io.on("connection", (socket) => {
           message,
         });
 
-        // Store message in the database (1-on-1)
-        const newMessage = new Message({
-          senderID,
-          receiverID,
-          senderUsername,
-          message,
-        });
-        newMessage.save();
+        await Message.create({ senderID, receiverID, senderUsername, message });
+      } else {
+        console.log(`❌ Receiver ${receiverID} not found`);
       }
     }
   );
 
-  // Send message to group
+  // Send group message
   socket.on(
     "send-group-message",
-    ({ senderID, groupID, senderUsername, message }) => {
-      if (groups[groupID]) {
-        io.to(groupID).emit("receive-group-message", {
-          senderID,
-          senderUsername,
-          message,
-        });
+    async ({ senderID, groupID, senderUsername, message }) => {
+      console.log(`🔹 Group message from ${senderID} to ${groupID}`);
 
-        // Store group message in the database
-        const newMessage = new Message({
-          senderID,
-          groupID,
-          senderUsername,
-          message,
-        });
-        newMessage.save();
-      }
+      io.to(groupID).emit("receive-group-message", {
+        senderID,
+        senderUsername,
+        message,
+      });
+
+      await Message.create({ senderID, groupID, senderUsername, message });
     }
   );
 
-  // Handle typing indicator
-  socket.on("typing", ({ senderID, receiverID }) => {
-    if (users[receiverID]) {
-      io.to(users[receiverID].socketID).emit("typing", { senderID });
-    }
-  });
-
-  // Handle group typing indicator
-  socket.on("group-typing", ({ senderID, groupID }) => {
-    io.to(groupID).emit("group-typing", { senderID });
-  });
-
-  // Handle user disconnection
   socket.on("disconnect", () => {
     for (let userID in users) {
       if (users[userID].socketID === socket.id) {
-        delete users[userID]; // Remove disconnected user
+        delete users[userID];
         break;
       }
     }
-    io.emit("update-users", Object.values(users)); // Emit updated user list
+    io.emit("update-users", Object.values(users));
   });
 });
 
-server.listen(5000, () => console.log("Server running on port 5000"));
+server.listen(5000, () => console.log("✅ Server running on port 5000"));
