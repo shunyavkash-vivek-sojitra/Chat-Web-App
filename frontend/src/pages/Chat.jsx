@@ -32,28 +32,34 @@ export default function Chat() {
   }, []);
 
   const handleSendMessage = () => {
-    if (selectedUser) {
-      socket.emit("send-message", {
+    if (selectedUser && currentMessage.trim()) {
+      const messageData = {
         senderID: localStorage.getItem("userID"),
         receiverID: selectedUser.userID,
         senderUsername: localStorage.getItem("username"),
         message: currentMessage,
-      });
+      };
+
+      socket.emit("send-message", messageData);
       setMessages([
         ...messages,
-        { senderUsername: "You", message: currentMessage, _id: Date.now() }, // Use current timestamp as a mock ID
+        { ...messageData, senderUsername: "You", _id: Date.now() },
       ]);
       setCurrentMessage("");
     }
   };
 
-  socket.on("receive-message", (message) => {
-    setMessages([...messages, message]);
-  });
+  useEffect(() => {
+    socket.on("receive-message", (message) => {
+      setMessages((prevMessages) => [...prevMessages, message]);
+    });
+
+    return () => socket.off("receive-message");
+  }, []);
 
   return (
-    <div className="chat">
-      <h1>Chat</h1>
+    <div className="app">
+      {/* Sidebar */}
       <div className="sidebar">
         <h3>Users</h3>
         <ul className="user-list">
@@ -68,8 +74,15 @@ export default function Chat() {
           ))}
         </ul>
       </div>
-      <div className="chat-window">
-        <h3>Chat with {selectedUser?.username}</h3>
+
+      {/* Chat Window */}
+      <div className="chat">
+        <div className="chat-header">
+          {selectedUser
+            ? `Chat with ${selectedUser.username}`
+            : "Select a user"}
+        </div>
+
         <div className="messages">
           {messages.map((msg) => (
             <div
@@ -82,15 +95,20 @@ export default function Chat() {
             </div>
           ))}
         </div>
-        <div className="input-container">
-          <input
-            type="text"
-            placeholder="Type a message"
-            value={currentMessage}
-            onChange={(e) => setCurrentMessage(e.target.value)}
-          />
-          <button onClick={handleSendMessage}>Send</button>
-        </div>
+
+        {/* Input Container */}
+        {selectedUser && (
+          <div className="input-container">
+            <input
+              type="text"
+              placeholder="Type a message"
+              value={currentMessage}
+              onChange={(e) => setCurrentMessage(e.target.value)}
+              onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
+            />
+            <button onClick={handleSendMessage}>Send</button>
+          </div>
+        )}
       </div>
     </div>
   );

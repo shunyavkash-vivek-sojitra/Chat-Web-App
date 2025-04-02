@@ -47,7 +47,9 @@ export default function Register() {
         value={username}
         onChange={(e) => setUsername(e.target.value)}
       />
-      <button onClick={handleRegister}>Register</button>
+      <button className="register-btn" onClick={handleRegister}>
+        Register
+      </button>
     </div>
   );
 }
