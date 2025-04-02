@@ -1,21 +1,28 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
+import { io } from "socket.io-client";
+
+const socket = io("http://localhost:5000", { autoConnect: false });
 
 export default function Register() {
   const navigate = useNavigate();
+  const [userID, setUserID] = useState("");
+  const [username, setUsername] = useState("");
 
   useEffect(() => {
-    const userID = localStorage.getItem("userID");
-    const username = localStorage.getItem("username");
+    const storedUserID = localStorage.getItem("userID");
+    const storedUsername = localStorage.getItem("username");
 
-    if (userID && username) {
+    if (storedUserID && storedUsername) {
+      if (!socket.connected) {
+        socket.connect(); // Connect only if not already connected
+        socket.emit("join", storedUserID, storedUsername);
+        console.log(`📡 Rejoined: ${storedUsername} (${storedUserID})`);
+      }
       navigate("/chat");
     }
   }, [navigate]);
-
-  const [userID, setUserID] = useState("");
-  const [username, setUsername] = useState("");
 
   const handleRegister = async () => {
     try {
@@ -26,6 +33,15 @@ export default function Register() {
 
       localStorage.setItem("userID", res.data.userID);
       localStorage.setItem("username", res.data.username);
+
+      if (!socket.connected) {
+        socket.connect();
+        socket.emit("join", res.data.userID, res.data.username);
+        console.log(
+          `📡 New user joined: ${res.data.username} (${res.data.userID})`
+        );
+      }
+
       navigate("/chat");
     } catch (error) {
       alert(error.response?.data?.error || "Registration failed");

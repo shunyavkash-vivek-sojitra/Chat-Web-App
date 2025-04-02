@@ -38,7 +38,7 @@ app.post("/register", async (req, res) => {
 
     return res.status(201).json({ userID, username });
   } catch (error) {
-    console.error("❌ Registration Error:", error); // Print the real error
+    console.error("❌ Registration Error:", error);
     return res
       .status(500)
       .json({ error: "Registration failed", details: error.message });
@@ -87,56 +87,27 @@ app.get("/groups", async (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  console.log("A user connected");
+  console.log(`⚡ New connection: ${socket.id}`);
 
   socket.on("join", (userID, username) => {
+    if (users[userID]) {
+      console.log(
+        `⚠️ User ${username} (${userID}) already connected with socket ${users[userID].socketID}`
+      );
+    } else {
+      console.log(
+        `✅ User ${username} (${userID}) joined with socket ${socket.id}`
+      );
+    }
+
     users[userID] = { id: userID, name: username, socketID: socket.id };
     io.emit("update-users", Object.values(users));
   });
 
-  socket.on("join-group", (groupID) => {
-    socket.join(groupID);
-  });
-
-  // Send 1-on-1 message
-  socket.on(
-    "send-message",
-    async ({ senderID, receiverID, senderUsername, message }) => {
-      console.log(`🔹 Message from ${senderID} to ${receiverID}`);
-
-      if (users[receiverID]) {
-        io.to(users[receiverID].socketID).emit("receive-message", {
-          senderID,
-          senderUsername,
-          message,
-        });
-
-        await Message.create({ senderID, receiverID, senderUsername, message });
-      } else {
-        console.log(`❌ Receiver ${receiverID} not found`);
-      }
-    }
-  );
-
-  // Send group message
-  socket.on(
-    "send-group-message",
-    async ({ senderID, groupID, senderUsername, message }) => {
-      console.log(`🔹 Group message from ${senderID} to ${groupID}`);
-
-      io.to(groupID).emit("receive-group-message", {
-        senderID,
-        senderUsername,
-        message,
-      });
-
-      await Message.create({ senderID, groupID, senderUsername, message });
-    }
-  );
-
   socket.on("disconnect", () => {
     for (let userID in users) {
       if (users[userID].socketID === socket.id) {
+        console.log(`❌ User disconnected: ${users[userID].name} (${userID})`);
         delete users[userID];
         break;
       }
